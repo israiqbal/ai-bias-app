@@ -259,7 +259,7 @@ if page == "Analyze":
                 doc.build(content)
                 buffer.seek(0)
                 return buffer
-            pdf = create_pdf()
+            pdf = create_onepage_pdf()
 
             st.download_button(
                 label="📄 Download Premium Report",
