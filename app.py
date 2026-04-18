@@ -154,7 +154,7 @@ if page == "Analyze":
                 st.success("✅ Model is Fair")
 
             # ------------------ PDF ------------------
-           def create_onepage_pdf():
+            def create_onepage_pdf():
                     buffer = io.BytesIO()
                     doc = SimpleDocTemplate(buffer)
                     styles = getSampleStyleSheet()
