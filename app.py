@@ -154,51 +154,108 @@ if page == "Analyze":
                 st.success("✅ Model is Fair")
 
             # ------------------ PDF ------------------
-            def create_pdf():
+           def create_onepage_pdf():
                 buffer = io.BytesIO()
                 doc = SimpleDocTemplate(buffer)
                 styles = getSampleStyleSheet()
             
                 content = []
             
+                # ------------------ TITLE ------------------
                 content.append(Paragraph("AI Bias Analysis Report", styles['Title']))
-                content.append(Spacer(1, 15))
+                content.append(Spacer(1, 8))
             
+                # ------------------ EXEC SUMMARY ------------------
+                bias_diff = abs(g1 - g2)
+                improvement = abs(g1 - g2) - abs(g1_after - g2_after)
+            
+                summary = f"""
+                This report evaluates bias between <b>{sensitive}</b> groups 
+                in predicting <b>{target}</b>. Initial disparity: {bias_diff:.2f}. 
+                Post-mitigation improvement: {improvement:.2f}.
+                """
+            
+                content.append(Paragraph(summary, styles['Normal']))
+                content.append(Spacer(1, 10))
+            
+                # ------------------ DATA CONTEXT ------------------
+                content.append(Paragraph("Data Context", styles['Heading3']))
+            
+                context_text = f"""
+                Sensitive Attribute: <b>{sensitive}</b><br/>
+                Target Variable: <b>{target}</b><br/>
+                Comparison: Prediction rates across groups
+                """
+            
+                content.append(Paragraph(context_text, styles['Normal']))
+                content.append(Spacer(1, 10))
+            
+                # ------------------ METRICS TABLE ------------------
                 table_data = [
                     ["Metric", "Before", "After"],
                     ["Group 1", f"{g1:.2f}", f"{g1_after:.2f}"],
-                    ["Group 2", f"{g2:.2f}", f"{g2_after:.2f}"]
+                    ["Group 2", f"{g2:.2f}", f"{g2_after:.2f}"],
+                    ["Bias Gap", f"{abs(g1-g2):.2f}", f"{abs(g1_after-g2_after):.2f}"]
                 ]
             
-                table = Table(table_data)
+                table = Table(table_data, colWidths=[120, 80, 80])
                 table.setStyle([
-                    ('BACKGROUND', (0,0), (-1,0), colors.grey),
+                    ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#1e293b")),
                     ('TEXTCOLOR', (0,0), (-1,0), colors.white),
-                    ('GRID', (0,0), (-1,-1), 1, colors.black)
+                    ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+                    ('FONTSIZE', (0,0), (-1,-1), 8)
                 ])
             
-                # ✅ FIXED INDENTATION
                 content.append(table)
+                content.append(Spacer(1, 10))
             
-                # ✅ matplotlib chart (INSIDE function)
-                fig2, ax = plt.subplots()
+                # ------------------ CHART ------------------
+                fig, ax = plt.subplots(figsize=(4,2.2))
             
                 ax.bar(
-                    ['Before G1','Before G2','After G1','After G2'],
+                    ['B-G1','B-G2','A-G1','A-G2'],
                     [g1, g2, g1_after, g2_after],
-                    color=['#3b82f6', '#ef4444', '#10b981', '#f59e0b']
+                    color=['#3b82f6','#ef4444','#10b981','#f59e0b']
                 )
             
-                ax.set_title("Bias Comparison")
-                ax.set_ylabel("Prediction Rate")
+                ax.set_title("Bias Comparison", fontsize=8)
+                ax.tick_params(axis='x', labelsize=6)
+                ax.tick_params(axis='y', labelsize=6)
             
-                fig2.savefig("chart.png")
-                plt.close(fig2)
+                fig.savefig("chart.png", bbox_inches='tight')
+                plt.close(fig)
             
-                content.append(Spacer(1, 20))
-                content.append(Image("chart.png", width=400, height=250))
+                content.append(Image("chart.png", width=320, height=150))
+                content.append(Spacer(1, 8))
             
-                # Build PDF
+                # ------------------ INSIGHTS ------------------
+                content.append(Paragraph("Insights", styles['Heading3']))
+            
+                if bias_diff > 0.2:
+                    level = "High bias observed"
+                elif bias_diff > 0.1:
+                    level = "Moderate bias observed"
+                else:
+                    level = "Low bias observed"
+            
+                insight_text = f"""
+                {level}. Removing <b>{sensitive}</b> improved fairness.
+                Model now shows more balanced predictions.
+                """
+            
+                content.append(Paragraph(insight_text, styles['Normal']))
+                content.append(Spacer(1, 6))
+            
+                # ------------------ RECOMMENDATION ------------------
+                content.append(Paragraph("Recommendation", styles['Heading3']))
+            
+                rec_text = """
+                Avoid using sensitive attributes directly. 
+                Apply fairness checks in deployment pipelines.
+                """
+            
+                content.append(Paragraph(rec_text, styles['Normal']))
+            
                 doc.build(content)
                 buffer.seek(0)
                 return buffer
