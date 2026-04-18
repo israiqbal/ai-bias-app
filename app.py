@@ -177,14 +177,31 @@ if page == "Analyze":
                     ('GRID', (0,0), (-1,-1), 1, colors.black)
                 ])
 
-                content.append(table)
+              content.append(table)
 
-                fig.write_image("chart.png")
-                content.append(Image("chart.png", width=400, height=250))
+# ✅ Create matplotlib chart for PDF (stable)
+fig2, ax = plt.subplots()
 
-                doc.build(content)
-                buffer.seek(0)
-                return buffer
+ax.bar(
+    ['Before G1','Before G2','After G1','After G2'],
+    [g1, g2, g1_after, g2_after],
+    color=['#3b82f6', '#ef4444', '#10b981', '#f59e0b']
+)
+
+ax.set_title("Bias Comparison")
+ax.set_ylabel("Prediction Rate")
+
+fig2.savefig("chart.png")
+plt.close(fig2)
+
+# Add chart to PDF
+content.append(Spacer(1, 20))
+content.append(Image("chart.png", width=400, height=250))
+
+# Build PDF
+doc.build(content)
+buffer.seek(0)
+return buffer
 
             pdf = create_pdf()
 
