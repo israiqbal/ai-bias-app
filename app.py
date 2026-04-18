@@ -155,54 +155,53 @@ if page == "Analyze":
 
             # ------------------ PDF ------------------
             def create_pdf():
-                buffer = io.BytesIO()
-                doc = SimpleDocTemplate(buffer)
-                styles = getSampleStyleSheet()
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer)
+    styles = getSampleStyleSheet()
 
-                content = []
+    content = []
 
-                content.append(Paragraph("AI Bias Analysis Report", styles['Title']))
-                content.append(Spacer(1, 15))
+    content.append(Paragraph("AI Bias Analysis Report", styles['Title']))
+    content.append(Spacer(1, 15))
 
-                table_data = [
-                    ["Metric", "Before", "After"],
-                    ["Group 1", f"{g1:.2f}", f"{g1_after:.2f}"],
-                    ["Group 2", f"{g2:.2f}", f"{g2_after:.2f}"]
-                ]
+    table_data = [
+        ["Metric", "Before", "After"],
+        ["Group 1", f"{g1:.2f}", f"{g1_after:.2f}"],
+        ["Group 2", f"{g2:.2f}", f"{g2_after:.2f}"]
+    ]
 
-                table = Table(table_data)
-                table.setStyle([
-                    ('BACKGROUND', (0,0), (-1,0), colors.grey),
-                    ('TEXTCOLOR', (0,0), (-1,0), colors.white),
-                    ('GRID', (0,0), (-1,-1), 1, colors.black)
-                ])
+    table = Table(table_data)
+    table.setStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.grey),
+        ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+        ('GRID', (0,0), (-1,-1), 1, colors.black)
+    ])
 
-              content.append(table)
+    # ✅ FIXED INDENTATION
+    content.append(table)
 
-# ✅ Create matplotlib chart for PDF (stable)
-fig2, ax = plt.subplots()
+    # ✅ matplotlib chart (INSIDE function)
+    fig2, ax = plt.subplots()
 
-ax.bar(
-    ['Before G1','Before G2','After G1','After G2'],
-    [g1, g2, g1_after, g2_after],
-    color=['#3b82f6', '#ef4444', '#10b981', '#f59e0b']
-)
+    ax.bar(
+        ['Before G1','Before G2','After G1','After G2'],
+        [g1, g2, g1_after, g2_after],
+        color=['#3b82f6', '#ef4444', '#10b981', '#f59e0b']
+    )
 
-ax.set_title("Bias Comparison")
-ax.set_ylabel("Prediction Rate")
+    ax.set_title("Bias Comparison")
+    ax.set_ylabel("Prediction Rate")
 
-fig2.savefig("chart.png")
-plt.close(fig2)
+    fig2.savefig("chart.png")
+    plt.close(fig2)
 
-# Add chart to PDF
-content.append(Spacer(1, 20))
-content.append(Image("chart.png", width=400, height=250))
+    content.append(Spacer(1, 20))
+    content.append(Image("chart.png", width=400, height=250))
 
-# Build PDF
-doc.build(content)
-buffer.seek(0)
-return buffer
-
+    # Build PDF
+    doc.build(content)
+    buffer.seek(0)
+    return buffer
             pdf = create_pdf()
 
             st.download_button(
