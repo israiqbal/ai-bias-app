@@ -179,7 +179,7 @@ if page == "Analyze":
 
                 content.append(table)
 
-                fig.savefig("chart.png")
+                fig.write_image("chart.png")
                 content.append(Image("chart.png", width=400, height=250))
 
                 doc.build(content)
