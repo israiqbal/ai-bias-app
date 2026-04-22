@@ -4,6 +4,6 @@ scikit-learn
 matplotlib
 plotly
 reportlab
-kaleido
-openai
-anthropic
+supabase
+google-generativeai
+groq requests
