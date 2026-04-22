@@ -6,4 +6,5 @@ plotly
 reportlab
 supabase
 google-generativeai
-groq requests
+groq
+requests
