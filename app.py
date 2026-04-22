@@ -216,9 +216,9 @@ if page == "📊 Analyze":
             
             except Exception as e:
                 st.error(f"API error: {str(e)}")
-                        if st.session_state.llm:
-                            st.markdown("### 💡 Insights")
-                            st.write(st.session_state.llm)
+                if st.session_state.llm:
+                        st.markdown("### 💡 Insights")
+                        st.write(st.session_state.llm)
 
 # =========================================================
 # 📄 REPORT PAGE
