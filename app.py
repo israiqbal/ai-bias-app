@@ -2,197 +2,250 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import matplotlib.pyplot as plt
-import json, hashlib, io, time
-from datetime import datetime
+import io
+import time
 
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
 
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table
+from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet
 
 # ------------------ CONFIG ------------------
-st.set_page_config(page_title="AI Bias Platform", layout="wide")
+st.set_page_config(page_title="AI Bias Analyzer", layout="wide")
 
-# ------------------ FILES ------------------
-USERS_FILE = "users.json"
-REPORTS_FILE = "reports.json"
+# ------------------ STYLING ------------------
+st.markdown("""
+<style>
+body { background: linear-gradient(135deg,#0f172a,#020617); color:#e2e8f0;}
+.title {font-size:42px;font-weight:800;text-align:center;}
+.subtitle {text-align:center;color:#94a3b8;margin-bottom:25px;}
+.card {
+    background:rgba(30,41,59,0.6);
+    padding:20px;
+    border-radius:15px;
+}
+</style>
+""", unsafe_allow_html=True)
 
-# ------------------ INIT FILES ------------------
-def init_files():
-    for file in [USERS_FILE, REPORTS_FILE]:
-        try:
-            open(file, "r")
-        except:
-            with open(file, "w") as f:
-                json.dump({}, f)
+# ------------------ STATE ------------------
+if "analysis" not in st.session_state:
+    st.session_state.analysis = None
+if "llm" not in st.session_state:
+    st.session_state.llm = None
 
-init_files()
+# ------------------ HEADER ------------------
+st.markdown('<div class="title">AI Bias Detection Platform</div>', unsafe_allow_html=True)
+st.markdown('<div class="subtitle">Detect • Explain • Mitigate AI Bias</div>', unsafe_allow_html=True)
 
-# ------------------ UTIL ------------------
-def hash_password(pw):
-    return hashlib.sha256(pw.encode()).hexdigest()
+# ------------------ SIDEBAR ------------------
+page = st.sidebar.radio("Navigation", ["🏠 Home", "📊 Analyze", "📄 Report"])
 
-def load_json(file):
-    with open(file, "r") as f:
-        return json.load(f)
+# =========================================================
+# 🏠 HOME
+# =========================================================
+if page == "🏠 Home":
 
-def save_json(file, data):
-    with open(file, "w") as f:
-        json.dump(data, f, indent=4)
+    col1, col2, col3 = st.columns(3)
 
-# ------------------ AUTH ------------------
-def signup(username, password):
-    users = load_json(USERS_FILE)
-    if username in users:
-        return False
-    users[username] = hash_password(password)
-    save_json(USERS_FILE, users)
-    return True
+    with col1:
+        st.markdown('<div class="card"><b>🎯 Objective</b><br>Detect bias in ML models</div>', unsafe_allow_html=True)
 
-def login(username, password):
-    users = load_json(USERS_FILE)
-    if username in users and users[username] == hash_password(password):
-        return True
-    return False
+    with col2:
+        st.markdown('<div class="card"><b>⚠️ Impact</b><br>Prevent unfair decisions</div>', unsafe_allow_html=True)
 
-# ------------------ SESSION ------------------
-if "user" not in st.session_state:
-    st.session_state.user = None
+    with col3:
+        st.markdown('<div class="card"><b>🚀 Applications</b><br>Finance, Hiring, Healthcare</div>', unsafe_allow_html=True)
 
-# ------------------ AUTH UI ------------------
-if not st.session_state.user:
+    st.markdown("### ⚙️ Workflow")
+    st.write("Upload → Analyze → Detect Bias → Mitigate → Generate Report")
 
-    st.title("🔐 Login / Signup")
+# =========================================================
+# 📊 ANALYSIS FUNCTION
+# =========================================================
+def run_analysis(df, target, sensitive):
 
-    tab1, tab2 = st.tabs(["Login", "Signup"])
+    df[target] = df[target].apply(lambda x: 1 if ">50K" in str(x) else 0)
 
-    with tab1:
-        u = st.text_input("Username")
-        p = st.text_input("Password", type="password")
+    X = pd.get_dummies(df.drop(columns=[target]))
+    y = df[target]
 
-        if st.button("Login"):
-            if login(u, p):
-                st.session_state.user = u
-                st.success("Logged in!")
-                st.rerun()
-            else:
-                st.error("Invalid credentials")
+    X_train, X_test, y_train, y_test = train_test_split(X, y)
 
-    with tab2:
-        u = st.text_input("New Username")
-        p = st.text_input("New Password", type="password")
+    scaler = StandardScaler(with_mean=False)
+    X_train = scaler.fit_transform(X_train)
+    X_test = scaler.transform(X_test)
 
-        if st.button("Signup"):
-            if signup(u, p):
-                st.success("Account created!")
-            else:
-                st.error("User exists")
+    model = LogisticRegression(max_iter=5000)
+    model.fit(X_train, y_train)
+    preds = model.predict(X_test)
 
-    st.stop()
+    df_test = df.loc[y_test.index].copy()
+    df_test["pred"] = preds
 
-# ------------------ LOGGED IN ------------------
-st.sidebar.success(f"Logged in as {st.session_state.user}")
+    g1 = df_test[df_test[sensitive] == df[sensitive].unique()[0]]["pred"].mean()
+    g2 = df_test[df_test[sensitive] == df[sensitive].unique()[1]]["pred"].mean()
 
-if st.sidebar.button("Logout"):
-    st.session_state.user = None
-    st.rerun()
+    # mitigation
+    X2 = pd.get_dummies(df.drop(columns=[target, sensitive]))
+    X_train2, X_test2, y_train2, y_test2 = train_test_split(X2, y)
 
-page = st.sidebar.radio("Navigate", ["Analyze", "Reports"])
+    model2 = LogisticRegression(max_iter=5000)
+    model2.fit(X_train2, y_train2)
+    preds2 = model2.predict(X_test2)
 
-# ------------------ ANALYSIS ------------------
-if page == "Analyze":
+    df_test2 = df.loc[y_test2.index].copy()
+    df_test2["pred"] = preds2
 
-    file = st.file_uploader("Upload CSV")
+    g1_after = df_test2[df_test2[sensitive] == df[sensitive].unique()[0]]["pred"].mean()
+    g2_after = df_test2[df_test2[sensitive] == df[sensitive].unique()[1]]["pred"].mean()
+
+    return {
+        "g1": g1, "g2": g2,
+        "g1_after": g1_after, "g2_after": g2_after,
+        "bias_before": abs(g1-g2),
+        "bias_after": abs(g1_after-g2_after),
+        "di": g2/g1 if g1 != 0 else 0,
+        "target": target,
+        "sensitive": sensitive
+    }
+
+# =========================================================
+# 📊 ANALYZE PAGE
+# =========================================================
+if page == "📊 Analyze":
+
+    file = st.file_uploader("Upload Dataset")
 
     if file:
         df = pd.read_csv(file).dropna()
+        st.dataframe(df.head())
 
         target = st.selectbox("Target", df.columns)
-        sensitive = st.selectbox("Sensitive", df.columns)
+        sensitive = st.selectbox("Sensitive Feature", df.columns)
 
         if st.button("Run Analysis"):
 
-            df[target] = df[target].apply(lambda x: 1 if ">50K" in str(x) else 0)
+            progress = st.progress(0)
+            for i in range(100):
+                time.sleep(0.01)
+                progress.progress(i+1)
 
-            X = pd.get_dummies(df.drop(columns=[target]))
-            y = df[target]
+            result = run_analysis(df, target, sensitive)
+            st.session_state.analysis = result
 
-            X_train, X_test, y_train, y_test = train_test_split(X, y)
+            st.toast("Analysis complete 🚀")
 
-            model = LogisticRegression(max_iter=5000)
-            model.fit(X_train, y_train)
+    # show results
+    if st.session_state.analysis:
+        r = st.session_state.analysis
 
-            preds = model.predict(X_test)
+        st.subheader("📊 Metrics")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Bias Before", round(r["bias_before"],2))
+        c2.metric("Bias After", round(r["bias_after"],2))
+        c3.metric("Disparate Impact", round(r["di"],2))
 
-            df_test = df.loc[y_test.index].copy()
-            df_test["pred"] = preds
+        chart_df = pd.DataFrame({
+            "Group":["Before G1","Before G2","After G1","After G2"],
+            "Value":[r["g1"],r["g2"],r["g1_after"],r["g2_after"]]
+        })
 
-            g1 = df_test[df_test[sensitive]==df[sensitive].unique()[0]]["pred"].mean()
-            g2 = df_test[df_test[sensitive]==df[sensitive].unique()[1]]["pred"].mean()
+        fig = px.bar(chart_df,x="Group",y="Value",color="Group")
+        st.plotly_chart(fig,use_container_width=True)
 
-            bias = abs(g1-g2)
+        # ---------------- LLM ----------------
+        st.subheader("🤖 AI Insights")
 
-            st.metric("Bias Score", round(bias,2))
+        provider = st.selectbox("Model",["OpenAI","Claude"])
 
-            chart_df = pd.DataFrame({
-                "Group":["G1","G2"],
-                "Value":[g1,g2]
-            })
+        if st.button("Generate Insights"):
 
-            fig = px.bar(chart_df,x="Group",y="Value")
-            st.plotly_chart(fig)
+            prompt = f"""
+            Analyze bias in {r['sensitive']} for {r['target']}.
+            Before: {r['g1']} vs {r['g2']}
+            After: {r['g1_after']} vs {r['g2_after']}
 
-            # ---------------- SAVE REPORT ----------------
-            reports = load_json(REPORTS_FILE)
+            Provide:
+            cause, mitigation steps, business explanation
+            """
 
-            report_id = str(datetime.now())
+            try:
+                if provider=="OpenAI":
+                    from openai import OpenAI
+                    client=OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+                    res=client.responses.create(model="gpt-4.1-mini",input=prompt)
+                    st.session_state.llm=res.output_text
+                else:
+                    import anthropic
+                    client=anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
+                    res=client.messages.create(
+                        model="claude-sonnet-4-5",
+                        max_tokens=800,
+                        messages=[{"role":"user","content":prompt}]
+                    )
+                    st.session_state.llm=res.content[0].text
 
-            reports.setdefault(st.session_state.user, {})[report_id] = {
-                "target": target,
-                "sensitive": sensitive,
-                "g1": float(g1),
-                "g2": float(g2),
-                "bias": float(bias)
-            }
+            except:
+                st.error("API error")
 
-            save_json(REPORTS_FILE, reports)
+        if st.session_state.llm:
+            st.markdown("### 💡 Insights")
+            st.write(st.session_state.llm)
 
-            st.success("Report saved!")
+# =========================================================
+# 📄 REPORT PAGE
+# =========================================================
+if page == "📄 Report":
 
-# ------------------ REPORT HISTORY ------------------
-if page == "Reports":
+    if not st.session_state.analysis:
+        st.warning("Run analysis first")
+    else:
+        r = st.session_state.analysis
 
-    st.header("📂 Your Reports")
+        st.header("📄 Report")
 
-    reports = load_json(REPORTS_FILE)
-    user_reports = reports.get(st.session_state.user, {})
+        st.write("Target:", r["target"])
+        st.write("Sensitive:", r["sensitive"])
 
-    if not user_reports:
-        st.info("No reports yet")
+        st.write("Bias Before:", r["bias_before"])
+        st.write("Bias After:", r["bias_after"])
 
-    for rid, r in user_reports.items():
+        st.write("### 🤖 AI Insights")
+        st.write(st.session_state.llm or "Generate insights first")
 
-        st.markdown("---")
-        st.write(f"📅 {rid}")
-        st.write(f"Target: {r['target']}")
-        st.write(f"Sensitive: {r['sensitive']}")
-        st.write(f"Bias: {r['bias']}")
-
-        # PDF
-        def make_pdf():
+        # -------- PDF --------
+        def create_pdf():
             buffer = io.BytesIO()
             doc = SimpleDocTemplate(buffer)
             styles = getSampleStyleSheet()
 
             content = []
-            content.append(Paragraph("Bias Report", styles['Title']))
-            content.append(Paragraph(f"Bias: {r['bias']}", styles['Normal']))
+            content.append(Paragraph("AI Bias Report", styles['Title']))
+
+            table = Table([
+                ["Metric","Before","After"],
+                ["Group1",r["g1"],r["g1_after"]],
+                ["Group2",r["g2"],r["g2_after"]]
+            ])
+            content.append(table)
+
+            fig2, ax = plt.subplots()
+            ax.bar(['B1','B2','A1','A2'],
+                   [r["g1"],r["g2"],r["g1_after"],r["g2_after"]])
+            fig2.savefig("chart.png")
+            plt.close(fig2)
+
+            content.append(Image("chart.png", width=300, height=150))
+
+            content.append(Paragraph(st.session_state.llm or "", styles['Normal']))
 
             doc.build(content)
             buffer.seek(0)
             return buffer
 
-        pdf = make_pdf()
+        pdf = create_pdf()
 
-        st.download_button("Download PDF", data=pdf, file_name=f"{rid}.pdf")
+        st.download_button("⬇️ Download Report", data=pdf, file_name="report.pdf")
