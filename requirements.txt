@@ -4,7 +4,7 @@ scikit-learn
 matplotlib
 plotly
 reportlab
-supabase
+supabase==2.4.0
 google-generativeai
 groq
 requests
