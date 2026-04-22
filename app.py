@@ -2,271 +2,197 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import matplotlib.pyplot as plt
-import io
-import time
+import json, hashlib, io, time
+from datetime import datetime
 
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
-from sklearn.preprocessing import StandardScaler
 
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table
-from reportlab.lib import colors
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table
 from reportlab.lib.styles import getSampleStyleSheet
 
 # ------------------ CONFIG ------------------
-st.set_page_config(page_title="AI Bias Analyzer", layout="wide")
+st.set_page_config(page_title="AI Bias Platform", layout="wide")
 
-# ------------------ STYLING ------------------
-st.markdown("""
-<style>
-body { background-color: #0f172a; color: white; }
-.big-title { font-size: 42px; font-weight: 800; text-align: center; }
-.subtitle { text-align: center; color: #94a3b8; margin-bottom: 30px; }
-.card {
-    background: rgba(30, 41, 59, 0.7);
-    backdrop-filter: blur(10px);
-    padding: 20px;
-    border-radius: 15px;
-    margin-bottom: 20px;
-}
-</style>
-""", unsafe_allow_html=True)
+# ------------------ FILES ------------------
+USERS_FILE = "users.json"
+REPORTS_FILE = "reports.json"
 
-# ------------------ HEADER ------------------
-st.markdown('<div class="big-title">AI Bias Detection Platform</div>', unsafe_allow_html=True)
-st.markdown('<div class="subtitle">Enterprise-grade fairness analysis tool</div>', unsafe_allow_html=True)
+# ------------------ INIT FILES ------------------
+def init_files():
+    for file in [USERS_FILE, REPORTS_FILE]:
+        try:
+            open(file, "r")
+        except:
+            with open(file, "w") as f:
+                json.dump({}, f)
 
-# ------------------ SIDEBAR ------------------
-st.sidebar.title("⚙️ Navigation")
-page = st.sidebar.radio("Go to", ["Home", "Analyze"])
+init_files()
 
-# ------------------ HOME ------------------
-if page == "Home":
-    st.markdown("""
-    ### 🚀 What this tool does:
-    - Detects bias in ML predictions  
-    - Applies mitigation techniques  
-    - Generates professional reports  
-    """)
+# ------------------ UTIL ------------------
+def hash_password(pw):
+    return hashlib.sha256(pw.encode()).hexdigest()
+
+def load_json(file):
+    with open(file, "r") as f:
+        return json.load(f)
+
+def save_json(file, data):
+    with open(file, "w") as f:
+        json.dump(data, f, indent=4)
+
+# ------------------ AUTH ------------------
+def signup(username, password):
+    users = load_json(USERS_FILE)
+    if username in users:
+        return False
+    users[username] = hash_password(password)
+    save_json(USERS_FILE, users)
+    return True
+
+def login(username, password):
+    users = load_json(USERS_FILE)
+    if username in users and users[username] == hash_password(password):
+        return True
+    return False
+
+# ------------------ SESSION ------------------
+if "user" not in st.session_state:
+    st.session_state.user = None
+
+# ------------------ AUTH UI ------------------
+if not st.session_state.user:
+
+    st.title("🔐 Login / Signup")
+
+    tab1, tab2 = st.tabs(["Login", "Signup"])
+
+    with tab1:
+        u = st.text_input("Username")
+        p = st.text_input("Password", type="password")
+
+        if st.button("Login"):
+            if login(u, p):
+                st.session_state.user = u
+                st.success("Logged in!")
+                st.rerun()
+            else:
+                st.error("Invalid credentials")
+
+    with tab2:
+        u = st.text_input("New Username")
+        p = st.text_input("New Password", type="password")
+
+        if st.button("Signup"):
+            if signup(u, p):
+                st.success("Account created!")
+            else:
+                st.error("User exists")
+
+    st.stop()
+
+# ------------------ LOGGED IN ------------------
+st.sidebar.success(f"Logged in as {st.session_state.user}")
+
+if st.sidebar.button("Logout"):
+    st.session_state.user = None
+    st.rerun()
+
+page = st.sidebar.radio("Navigate", ["Analyze", "Reports"])
 
 # ------------------ ANALYSIS ------------------
 if page == "Analyze":
 
-    file = st.file_uploader("📂 Upload CSV Dataset")
+    file = st.file_uploader("Upload CSV")
 
     if file:
         df = pd.read_csv(file).dropna()
-        st.dataframe(df.head())
 
-        target = st.selectbox("🎯 Select Target Column", df.columns)
-        sensitive = st.selectbox("⚠️ Select Sensitive Attribute", df.columns)
+        target = st.selectbox("Target", df.columns)
+        sensitive = st.selectbox("Sensitive", df.columns)
 
-        if st.button("🚀 Run Analysis"):
+        if st.button("Run Analysis"):
 
-            # Animation
-            progress = st.progress(0)
-            for i in range(100):
-                time.sleep(0.01)
-                progress.progress(i + 1)
+            df[target] = df[target].apply(lambda x: 1 if ">50K" in str(x) else 0)
 
-            with st.spinner("Running AI analysis..."):
+            X = pd.get_dummies(df.drop(columns=[target]))
+            y = df[target]
 
-                # ------------------ MODEL ------------------
-                df[target] = df[target].apply(lambda x: 1 if ">50K" in str(x) else 0)
+            X_train, X_test, y_train, y_test = train_test_split(X, y)
 
-                X = df.drop(columns=[target])
-                y = df[target]
+            model = LogisticRegression(max_iter=5000)
+            model.fit(X_train, y_train)
 
-                X = pd.get_dummies(X)
+            preds = model.predict(X_test)
 
-                X_train, X_test, y_train, y_test = train_test_split(
-                    X, y, test_size=0.2, random_state=42
-                )
+            df_test = df.loc[y_test.index].copy()
+            df_test["pred"] = preds
 
-                scaler = StandardScaler(with_mean=False)
-                X_train = scaler.fit_transform(X_train)
-                X_test = scaler.transform(X_test)
+            g1 = df_test[df_test[sensitive]==df[sensitive].unique()[0]]["pred"].mean()
+            g2 = df_test[df_test[sensitive]==df[sensitive].unique()[1]]["pred"].mean()
 
-                model = LogisticRegression(max_iter=5000, solver='liblinear')
-                model.fit(X_train, y_train)
-                preds = model.predict(X_test)
+            bias = abs(g1-g2)
 
-                df_test = df.loc[y_test.index].copy()
-                df_test['pred'] = preds
-
-                g1 = df_test[df_test[sensitive] == df[sensitive].unique()[0]]['pred'].mean()
-                g2 = df_test[df_test[sensitive] == df[sensitive].unique()[1]]['pred'].mean()
-
-                di_ratio = g2 / g1
-                bias_score = abs(g1 - g2)
-
-                # ------------------ MITIGATION ------------------
-                X2 = df.drop(columns=[target, sensitive])
-                y2 = df[target]
-
-                X2 = pd.get_dummies(X2)
-
-                X_train2, X_test2, y_train2, y_test2 = train_test_split(
-                    X2, y2, test_size=0.2, random_state=42
-                )
-
-                idx = X_test2.index
-
-                scaler2 = StandardScaler(with_mean=False)
-                X_train2 = scaler2.fit_transform(X_train2)
-                X_test2 = scaler2.transform(X_test2)
-
-                model2 = LogisticRegression(max_iter=5000, solver='liblinear')
-                model2.fit(X_train2, y_train2)
-                preds2 = model2.predict(X_test2)
-
-                df_test2 = df.loc[idx].copy()
-                df_test2['pred'] = preds2
-
-                g1_after = df_test2[df_test2[sensitive] == df[sensitive].unique()[0]]['pred'].mean()
-                g2_after = df_test2[df_test2[sensitive] == df[sensitive].unique()[1]]['pred'].mean()
-
-            st.divider()
-
-            # ------------------ METRICS ------------------
-            st.subheader("📊 Key Metrics")
-
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Bias Score", round(bias_score, 2))
-            col2.metric("Disparate Impact", round(di_ratio, 2))
-            col3.metric("Improvement", round(abs(g1 - g2) - abs(g1_after - g2_after), 2))
-
-            # ------------------ INTERACTIVE CHART ------------------
-            st.subheader("📈 Interactive Comparison")
+            st.metric("Bias Score", round(bias,2))
 
             chart_df = pd.DataFrame({
-                "Group": ["Before G1", "Before G2", "After G1", "After G2"],
-                "Value": [g1, g2, g1_after, g2_after]
+                "Group":["G1","G2"],
+                "Value":[g1,g2]
             })
 
-            fig = px.bar(chart_df, x="Group", y="Value", color="Group")
-            st.plotly_chart(fig, use_container_width=True)
+            fig = px.bar(chart_df,x="Group",y="Value")
+            st.plotly_chart(fig)
 
-            # ------------------ STATUS ------------------
-            if di_ratio < 0.8:
-                st.error("⚠️ High Bias Detected")
-            else:
-                st.success("✅ Model is Fair")
+            # ---------------- SAVE REPORT ----------------
+            reports = load_json(REPORTS_FILE)
 
-            # ------------------ PDF ------------------
-            def create_onepage_pdf():
-                    buffer = io.BytesIO()
-                    doc = SimpleDocTemplate(buffer)
-                    styles = getSampleStyleSheet()
-                
-                    content = []
-                
-                    # ------------------ TITLE ------------------
-                    content.append(Paragraph("AI Bias Analysis Report", styles['Title']))
-                    content.append(Spacer(1, 8))
-                
-                    # ------------------ EXEC SUMMARY ------------------
-                    bias_diff = abs(g1 - g2)
-                    improvement = abs(g1 - g2) - abs(g1_after - g2_after)
-                
-                    summary = f"""
-                    This report evaluates bias between <b>{sensitive}</b> groups 
-                    in predicting <b>{target}</b>. Initial disparity: {bias_diff:.2f}. 
-                    Post-mitigation improvement: {improvement:.2f}.
-                    """
-                
-                    content.append(Paragraph(summary, styles['Normal']))
-                    content.append(Spacer(1, 10))
-                
-                    # ------------------ DATA CONTEXT ------------------
-                    content.append(Paragraph("Data Context", styles['Heading3']))
-                
-                    context_text = f"""
-                    Sensitive Attribute: <b>{sensitive}</b><br/>
-                    Target Variable: <b>{target}</b><br/>
-                    Comparison: Prediction rates across groups
-                    """
-                
-                    content.append(Paragraph(context_text, styles['Normal']))
-                    content.append(Spacer(1, 10))
-                
-                    # ------------------ METRICS TABLE ------------------
-                    table_data = [
-                        ["Metric", "Before", "After"],
-                        ["Group 1", f"{g1:.2f}", f"{g1_after:.2f}"],
-                        ["Group 2", f"{g2:.2f}", f"{g2_after:.2f}"],
-                        ["Bias Gap", f"{abs(g1-g2):.2f}", f"{abs(g1_after-g2_after):.2f}"]
-                    ]
-                
-                    table = Table(table_data, colWidths=[120, 80, 80])
-                    table.setStyle([
-                        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#1e293b")),
-                        ('TEXTCOLOR', (0,0), (-1,0), colors.white),
-                        ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
-                        ('FONTSIZE', (0,0), (-1,-1), 8)
-                    ])
-                
-                    content.append(table)
-                    content.append(Spacer(1, 10))
-                
-                    # ------------------ CHART ------------------
-                    fig, ax = plt.subplots(figsize=(4,2.2))
-                
-                    ax.bar(
-                        ['B-G1','B-G2','A-G1','A-G2'],
-                        [g1, g2, g1_after, g2_after],
-                        color=['#3b82f6','#ef4444','#10b981','#f59e0b']
-                    )
-                
-                    ax.set_title("Bias Comparison", fontsize=8)
-                    ax.tick_params(axis='x', labelsize=6)
-                    ax.tick_params(axis='y', labelsize=6)
-                
-                    fig.savefig("chart.png", bbox_inches='tight')
-                    plt.close(fig)
-                
-                    content.append(Image("chart.png", width=320, height=150))
-                    content.append(Spacer(1, 8))
-                
-                    # ------------------ INSIGHTS ------------------
-                    content.append(Paragraph("Insights", styles['Heading3']))
-                
-                    if bias_diff > 0.2:
-                        level = "High bias observed"
-                    elif bias_diff > 0.1:
-                        level = "Moderate bias observed"
-                    else:
-                        level = "Low bias observed"
-                
-                    insight_text = f"""
-                    {level}. Removing <b>{sensitive}</b> improved fairness.
-                    Model now shows more balanced predictions.
-                    """
-                
-                    content.append(Paragraph(insight_text, styles['Normal']))
-                    content.append(Spacer(1, 6))
-                
-                    # ------------------ RECOMMENDATION ------------------
-                    content.append(Paragraph("Recommendation", styles['Heading3']))
-                
-                    rec_text = """
-                    Avoid using sensitive attributes directly. 
-                    Apply fairness checks in deployment pipelines.
-                    """
-                
-                    content.append(Paragraph(rec_text, styles['Normal']))
-                
-                    doc.build(content)
-                    buffer.seek(0)
-                    return buffer
-            pdf = create_onepage_pdf()
+            report_id = str(datetime.now())
 
-            st.download_button(
-                label="📄 Download Premium Report",
-                data=pdf,
-                file_name="bias_report.pdf",
-                mime="application/pdf"
-            )
+            reports.setdefault(st.session_state.user, {})[report_id] = {
+                "target": target,
+                "sensitive": sensitive,
+                "g1": float(g1),
+                "g2": float(g2),
+                "bias": float(bias)
+            }
 
-            st.markdown("---")
-            st.markdown("Built with ❤️ by Isra Iqbal")
+            save_json(REPORTS_FILE, reports)
+
+            st.success("Report saved!")
+
+# ------------------ REPORT HISTORY ------------------
+if page == "Reports":
+
+    st.header("📂 Your Reports")
+
+    reports = load_json(REPORTS_FILE)
+    user_reports = reports.get(st.session_state.user, {})
+
+    if not user_reports:
+        st.info("No reports yet")
+
+    for rid, r in user_reports.items():
+
+        st.markdown("---")
+        st.write(f"📅 {rid}")
+        st.write(f"Target: {r['target']}")
+        st.write(f"Sensitive: {r['sensitive']}")
+        st.write(f"Bias: {r['bias']}")
+
+        # PDF
+        def make_pdf():
+            buffer = io.BytesIO()
+            doc = SimpleDocTemplate(buffer)
+            styles = getSampleStyleSheet()
+
+            content = []
+            content.append(Paragraph("Bias Report", styles['Title']))
+            content.append(Paragraph(f"Bias: {r['bias']}", styles['Normal']))
+
+            doc.build(content)
+            buffer.seek(0)
+            return buffer
+
+        pdf = make_pdf()
+
+        st.download_button("Download PDF", data=pdf, file_name=f"{rid}.pdf")
