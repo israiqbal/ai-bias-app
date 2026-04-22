@@ -5,6 +5,8 @@ matplotlib
 plotly
 reportlab
 supabase==2.4.0
+gotrue==2.4.0
+httpx==0.27.0
 google-generativeai
 groq
 requests
