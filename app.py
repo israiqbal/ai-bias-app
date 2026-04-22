@@ -173,52 +173,52 @@ if page == "📊 Analyze":
             """
 
             try:
-    if provider == "OpenAI":
-        from openai import OpenAI
-
-        if "OPENAI_API_KEY" not in st.secrets:
-            st.error("OpenAI API key not found")
-            st.stop()
-
-        client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-
-        res = client.responses.create(
-            model="gpt-4.1-mini",
-            input=prompt
-        )
-
-        # safer extraction
-        output = res.output[0].content[0].text
-
-    else:
-        import anthropic
-
-        if "ANTHROPIC_API_KEY" not in st.secrets:
-            st.error("Claude API key not found")
-            st.stop()
-
-        client = anthropic.Anthropic(
-            api_key=st.secrets["ANTHROPIC_API_KEY"]
-        )
-
-        res = client.messages.create(
-            model="claude-sonnet-4-5",
-            max_tokens=800,
-            messages=[{"role": "user", "content": prompt}]
-        )
-
-        # safer parsing
-        output = res.content[0].text
-
-    st.session_state.llm = output
-    st.success("AI insights generated")
-    st.write(output)
-
-except Exception as e:
-    st.error(f"API error: {str(e)}")
-        if st.session_state.llm:
-            st.markdown("### 💡 Insights")
-            st.write(st.session_state.llm)
+                if provider == "OpenAI":
+                    from openai import OpenAI
+            
+                    if "OPENAI_API_KEY" not in st.secrets:
+                        st.error("OpenAI API key not found")
+                        st.stop()
+            
+                    client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+            
+                    res = client.responses.create(
+                        model="gpt-4.1-mini",
+                        input=prompt
+                    )
+            
+                    # safer extraction
+                    output = res.output[0].content[0].text
+            
+                else:
+                    import anthropic
+            
+                    if "ANTHROPIC_API_KEY" not in st.secrets:
+                        st.error("Claude API key not found")
+                        st.stop()
+            
+                    client = anthropic.Anthropic(
+                        api_key=st.secrets["ANTHROPIC_API_KEY"]
+                    )
+            
+                    res = client.messages.create(
+                        model="claude-sonnet-4-5",
+                        max_tokens=800,
+                        messages=[{"role": "user", "content": prompt}]
+                    )
+            
+                    # safer parsing
+                    output = res.content[0].text
+            
+                st.session_state.llm = output
+                st.success("AI insights generated")
+                st.write(output)
+            
+            except Exception as e:
+                st.error(f"API error: {str(e)}")
+                    if st.session_state.llm:
+                        st.markdown("### 💡 Insights")
+                        st.write(st.session_state.llm)
 
 # =========================================================
 # 📄 REPORT PAGE
