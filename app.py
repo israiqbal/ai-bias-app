@@ -62,41 +62,57 @@ if page == "Analyze":
 
         if st.button("Run Analysis"):
 
-            # -------- TARGET FIX --------
+            # -------- STRONG TARGET FIX --------
             if df[target].dtype == "object":
-                df[target] = df[target].astype("category").cat.codes
 
+                df[target] = df[target].replace({
+                    "<=50K": 0,
+                    ">50K": 1,
+                    "<=50K.": 0,
+                    ">50K.": 1
+                })
+
+                df[target] = pd.to_numeric(df[target], errors="coerce")
+
+            # DROP INVALID
+            df = df.dropna(subset=[target])
+
+            # -------- FEATURES --------
             X = df.drop(columns=[target])
-            y = pd.to_numeric(df[target], errors="coerce")
+            y = df[target]
+
+            st.write("Target Distribution:", y.value_counts())
 
             if len(y.unique()) < 2:
-                st.error("Target must have at least 2 classes")
+                st.error("❌ Target must have at least 2 classes")
                 st.stop()
 
             X = pd.get_dummies(X)
 
+            # -------- SPLIT --------
             X_train, X_test, y_train, y_test = train_test_split(
                 X, y, test_size=0.2, random_state=42, stratify=y
             )
 
+            # -------- SCALE --------
             scaler = StandardScaler(with_mean=False)
             X_train = scaler.fit_transform(X_train)
             X_test = scaler.transform(X_test)
 
+            # -------- MODEL --------
             model = LogisticRegression(max_iter=5000, solver="liblinear")
             model.fit(X_train, y_train)
 
             preds = model.predict(X_test)
 
-            # -------- SAFE NUMERIC FIX --------
+            # -------- SAFE NUMERIC --------
             df_test = df.iloc[y_test.index].copy()
             df_test["pred"] = pd.to_numeric(preds, errors="coerce")
 
-            # -------- SAFE GROUPBY --------
+            # -------- GROUPING --------
             grouped = (
                 df_test[[sensitive, "pred"]]
                 .dropna()
-                .assign(pred=lambda x: pd.to_numeric(x["pred"], errors="coerce"))
                 .groupby(sensitive, as_index=False)["pred"]
                 .mean()
             )
