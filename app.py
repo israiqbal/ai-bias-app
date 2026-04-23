@@ -111,19 +111,33 @@ if page == "Analyze":
             df_test["pred"] = pd.to_numeric(preds, errors="coerce")
 
             # -------- GROUPING --------
-            grouped = (
-                df_test[[sensitive, "pred"]]
-                .dropna()
-                .groupby(sensitive, as_index=False)["pred"]
-                .mean()
-            )
+            # -------- SAFE GROUP CALCULATION --------
 
-            if grouped.shape[0] < 2:
+            df_test["pred"] = pd.to_numeric(df_test["pred"], errors="coerce")
+            
+            group_values = df_test[sensitive].dropna().unique()
+            
+            if len(group_values) < 2:
                 st.error("Sensitive column must have at least 2 groups")
                 st.stop()
-
-            g1 = grouped["pred"].iloc[0]
-            g2 = grouped["pred"].iloc[1]
+            
+            g1_data = df_test[df_test[sensitive] == group_values[0]]["pred"].dropna()
+            g2_data = df_test[df_test[sensitive] == group_values[1]]["pred"].dropna()
+            
+            if len(g1_data) == 0 or len(g2_data) == 0:
+                st.error("Prediction alignment issue. Try again.")
+                st.stop()
+            
+            g1 = g1_data.mean()
+            g2 = g2_data.mean()
+            
+            bias = abs(g1 - g2)
+            
+            # Create chart dataframe manually
+            grouped = pd.DataFrame({
+                sensitive: [group_values[0], group_values[1]],
+                "pred": [g1, g2]
+            })
 
             if pd.isna(g1) or pd.isna(g2):
                 st.error("Computation failed. Try different column")
