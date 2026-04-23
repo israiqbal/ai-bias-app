@@ -4,7 +4,7 @@ import plotly.express as px
 import io
 
 from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
@@ -94,7 +94,7 @@ if page == "Analyze":
             X_train = scaler.fit_transform(X_train)
             X_test = scaler.transform(X_test)
 
-            model = LogisticRegression(max_iter=1000, class_weight="balanced")
+            model = RandomForestClassifier(n_estimators=100)
             model.fit(X_train, y_train)
 
             preds = model.predict(X_test)
