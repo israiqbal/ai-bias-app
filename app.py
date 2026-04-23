@@ -1,69 +1,43 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import matplotlib.pyplot as plt
-import io
 import time
 
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 
-# LLM imports handled dynamically
-
-# ------------------ CONFIG ------------------
+# ---------------- CONFIG ----------------
 st.set_page_config(page_title="AI Bias Analyzer", layout="wide")
 
-# ------------------ HEADER ------------------
 st.title("AI Bias Detection Platform")
-st.caption("Enterprise-grade fairness analysis tool")
 
-# ------------------ SIDEBAR ------------------
+# ---------------- NAV ----------------
 page = st.sidebar.radio("Go to", ["Home", "Analyze"])
 
-# ------------------ HOME ------------------
+# ---------------- HOME ----------------
 if page == "Home":
-    st.write("Upload dataset → Analyze bias → Get AI insights")
+    st.write("Upload dataset → Analyze bias → Get insights")
 
-# =========================================================
-# 🤖 LLM FUNCTION
-# =========================================================
+# ---------------- LLM ----------------
 def generate_llm_explanation(prompt):
-
-    # GEMINI
     try:
         import google.generativeai as genai
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
         model = genai.GenerativeModel("gemini-pro")
-        response = model.generate_content(prompt)
-        return "🟢 Gemini:\n\n" + response.text
-    except Exception as e:
-        st.warning(f"Gemini failed → {e}")
+        res = model.generate_content(prompt)
+        return res.text
+    except:
+        return "Local fallback: Bias detected. Improve fairness."
 
-    # GROQ
-    try:
-        from groq import Groq
-        client = Groq(api_key=st.secrets["GROQ_API_KEY"])
-        chat = client.chat.completions.create(
-            model="llama3-8b-8192",
-            messages=[{"role": "user", "content": prompt}]
-        )
-        return "🟡 Groq:\n\n" + chat.choices[0].message.content
-    except Exception as e:
-        st.warning(f"Groq failed → {e}")
-
-    # LOCAL
-    return "🔴 Local fallback: Bias detected. Use fairness techniques."
-
-# =========================================================
-# 📊 ANALYSIS
-# =========================================================
+# ---------------- ANALYZE ----------------
 if page == "Analyze":
 
     file = st.file_uploader("Upload CSV")
 
     if file:
-        df = pd.read_csv(file).dropna()
+        df = pd.read_csv(file)
+
         st.dataframe(df.head())
 
         target = st.selectbox("Target Column", df.columns)
@@ -71,18 +45,30 @@ if page == "Analyze":
 
         if st.button("Run Analysis"):
 
-            with st.spinner("Running model..."):
+            with st.spinner("Processing..."):
 
-                # TARGET FIX
+                df = df.dropna()
+
+                # ✅ STRONG TARGET FIX
                 if df[target].dtype == "object":
-                    df[target] = df[target].astype("category").cat.codes
+                    df[target] = df[target].str.strip()
 
+                    unique_vals = df[target].unique()
+
+                    if len(unique_vals) == 2:
+                        df[target] = df[target].map({
+                            unique_vals[0]: 0,
+                            unique_vals[1]: 1
+                        })
+                    else:
+                        df[target] = df[target].astype("category").cat.codes
+
+                # -------- MODEL --------
                 X = df.drop(columns=[target])
                 y = df[target]
 
-                # VALIDATION
                 if len(y.unique()) < 2:
-                    st.error("Target must have at least 2 classes")
+                    st.error("Target must have 2 classes")
                     st.stop()
 
                 X = pd.get_dummies(X)
@@ -98,45 +84,30 @@ if page == "Analyze":
                 model = LogisticRegression(max_iter=5000, solver="liblinear")
                 model.fit(X_train, y_train)
 
-                preds = model.predict(X_test)
-
-                # FORCE NUMERIC (CRITICAL FIX)
-                preds = pd.Series(preds).astype(float)
+                preds = model.predict(X_test)  # already numeric
 
                 df_test = df.loc[y_test.index].copy()
-                df_test["pred"] = preds.values
+                df_test["pred"] = preds
 
-                groups = df_test[sensitive].unique()
+                # -------- GROUP FIX --------
+                groups = df_test[sensitive].dropna().unique()
 
                 if len(groups) < 2:
-                    st.error("Sensitive column must have at least 2 groups")
+                    st.error("Sensitive column must have 2 groups")
                     st.stop()
 
-                # SAFE MEAN FUNCTION
-                def safe_mean(data):
-                    return pd.to_numeric(data, errors='coerce').mean()
+                g1 = df_test[df_test[sensitive] == groups[0]]["pred"].mean()
+                g2 = df_test[df_test[sensitive] == groups[1]]["pred"].mean()
 
-                g1_data = df_test[df_test[sensitive] == groups[0]]["pred"]
-                g2_data = df_test[df_test[sensitive] == groups[1]]["pred"]
-
-                if len(g1_data) == 0 or len(g2_data) == 0:
-                    st.error("Group split failed. Choose different sensitive column.")
-                    st.stop()
-
-                g1 = safe_mean(g1_data)
-                g2 = safe_mean(g2_data)
-
-                bias_score = abs(g1 - g2)
-                di_ratio = g2 / g1 if g1 != 0 else 0
+                bias = abs(g1 - g2)
 
             st.success("Analysis Complete")
 
-            # METRICS
+            # -------- OUTPUT --------
             col1, col2 = st.columns(2)
-            col1.metric("Bias Score", round(bias_score, 2))
-            col2.metric("Disparate Impact", round(di_ratio, 2))
+            col1.metric("Bias Score", round(bias, 3))
+            col2.metric("Group Difference", round(abs(g1 - g2), 3))
 
-            # CHART
             chart_df = pd.DataFrame({
                 "Group": ["Group 1", "Group 2"],
                 "Value": [g1, g2]
@@ -145,18 +116,13 @@ if page == "Analyze":
             fig = px.bar(chart_df, x="Group", y="Value")
             st.plotly_chart(fig)
 
-            # LLM
+            # -------- LLM --------
             st.subheader("AI Insights")
 
             prompt = f"""
-            Bias analysis:
-            Feature: {sensitive}
-            Target: {target}
-            Group1: {g1}
-            Group2: {g2}
-            Bias: {bias_score}
+            Bias detected in feature {sensitive}.
+            Group1: {g1}, Group2: {g2}.
             Explain and suggest fixes.
             """
 
-            explanation = generate_llm_explanation(prompt)
-            st.write(explanation)
+            st.write(generate_llm_explanation(prompt))
