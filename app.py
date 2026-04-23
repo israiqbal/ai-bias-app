@@ -228,8 +228,8 @@ if page == "📊 Analyze":
                         messages=[{"role":"user","content":prompt}]
                     )
                     st.session_state.llm=res.content[0].text
-            except:
-                st.error("API error")
+            except Exception as e:
+                st.error(f"Error: {e}")
 
         if st.session_state.llm:
             st.write(st.session_state.llm)
