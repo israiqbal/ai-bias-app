@@ -10,9 +10,6 @@ from sklearn.preprocessing import StandardScaler
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet
 
-# 🔥 CRITICAL FIX (DISABLE ARROW)
-pd.options.mode.dtype_backend = "numpy_nullable"
-
 # ---------------- CONFIG ----------------
 st.set_page_config(page_title="AI Bias Analyzer", layout="wide")
 st.title("AI Bias Detection Platform")
@@ -50,14 +47,13 @@ if page == "Analyze":
     file = st.file_uploader("Upload CSV")
 
     if file:
-        # 🔥 FORCE NUMPY TYPES
-        df = pd.read_csv(file, dtype_backend="numpy_nullable")
+        df = pd.read_csv(file)
 
         df = df.dropna()
 
         # CLEAN STRINGS
         for col in df.select_dtypes(include="object"):
-            df[col] = df[col].str.strip()
+            df[col] = df[col].astype(str).str.strip()
 
         st.dataframe(df.head())
 
@@ -71,10 +67,10 @@ if page == "Analyze":
                 df[target] = df[target].astype("category").cat.codes
 
             X = df.drop(columns=[target])
-            y = df[target]
+            y = pd.to_numeric(df[target], errors="coerce")
 
             if len(y.unique()) < 2:
-                st.error("Target must have 2 classes")
+                st.error("Target must have at least 2 classes")
                 st.stop()
 
             X = pd.get_dummies(X)
@@ -92,11 +88,11 @@ if page == "Analyze":
 
             preds = model.predict(X_test)
 
-            # 🔥 FORCE NUMERIC HARD
+            # -------- SAFE NUMERIC FIX --------
             df_test = df.iloc[y_test.index].copy()
-            df_test["pred"] = pd.Series(preds, index=y_test.index).astype(float)
+            df_test["pred"] = pd.to_numeric(preds, errors="coerce")
 
-            # 🔥 SAFE GROUPING
+            # -------- SAFE GROUPBY --------
             grouped = (
                 df_test[[sensitive, "pred"]]
                 .dropna()
@@ -111,6 +107,10 @@ if page == "Analyze":
 
             g1 = grouped["pred"].iloc[0]
             g2 = grouped["pred"].iloc[1]
+
+            if pd.isna(g1) or pd.isna(g2):
+                st.error("Computation failed. Try different column")
+                st.stop()
 
             bias = abs(g1 - g2)
 
