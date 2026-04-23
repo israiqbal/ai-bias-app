@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import time
 
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
@@ -49,10 +48,11 @@ if page == "Analyze":
 
                 df = df.dropna()
 
-                # ✅ STRONG TARGET FIX
-                if df[target].dtype == "object":
-                    df[target] = df[target].str.strip()
+                # -------- CLEAN STRINGS --------
+                df = df.apply(lambda col: col.str.strip() if col.dtype == "object" else col)
 
+                # -------- TARGET FIX --------
+                if df[target].dtype == "object":
                     unique_vals = df[target].unique()
 
                     if len(unique_vals) == 2:
@@ -63,7 +63,6 @@ if page == "Analyze":
                     else:
                         df[target] = df[target].astype("category").cat.codes
 
-                # -------- MODEL --------
                 X = df.drop(columns=[target])
                 y = df[target]
 
@@ -84,20 +83,39 @@ if page == "Analyze":
                 model = LogisticRegression(max_iter=5000, solver="liblinear")
                 model.fit(X_train, y_train)
 
-                preds = model.predict(X_test)  # already numeric
+                preds = model.predict(X_test)
 
+                # -------- CRITICAL FIX --------
                 df_test = df.loc[y_test.index].copy()
-                df_test["pred"] = preds
 
-                # -------- GROUP FIX --------
+                df_test["pred"] = pd.to_numeric(
+                    pd.Series(preds, index=y_test.index),
+                    errors="coerce"
+                )
+
+                # -------- GROUP HANDLING --------
                 groups = df_test[sensitive].dropna().unique()
 
                 if len(groups) < 2:
-                    st.error("Sensitive column must have 2 groups")
+                    st.error("Sensitive column must have at least 2 groups")
                     st.stop()
 
-                g1 = df_test[df_test[sensitive] == groups[0]]["pred"].mean()
-                g2 = df_test[df_test[sensitive] == groups[1]]["pred"].mean()
+                g1_series = pd.to_numeric(
+                    df_test[df_test[sensitive] == groups[0]]["pred"],
+                    errors="coerce"
+                )
+
+                g2_series = pd.to_numeric(
+                    df_test[df_test[sensitive] == groups[1]]["pred"],
+                    errors="coerce"
+                )
+
+                if g1_series.empty or g2_series.empty:
+                    st.error("Group split failed. Choose a better sensitive column.")
+                    st.stop()
+
+                g1 = g1_series.mean()
+                g2 = g2_series.mean()
 
                 bias = abs(g1 - g2)
 
@@ -122,7 +140,7 @@ if page == "Analyze":
             prompt = f"""
             Bias detected in feature {sensitive}.
             Group1: {g1}, Group2: {g2}.
-            Explain and suggest fixes.
+            Explain cause and mitigation.
             """
 
             st.write(generate_llm_explanation(prompt))
