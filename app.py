@@ -101,10 +101,10 @@ if page == "Analyze":
 
             # -------- CLEAN ANALYSIS DF --------
             sens_test = sensitive_series.loc[y_test.index]
-
+            preds = pd.to_numeric(preds, errors="coerce")
             analysis_df = pd.DataFrame({
                 "sensitive": sens_test.tolist(),
-                "pred": [int(p) for p in preds]  # 🔥 force pure int
+                "pred": [int(p) if pd.notna(p) else 0 for p in preds]
             })
 
             # -------- PURE PYTHON GROUPING (NO PANDAS MEAN) --------
