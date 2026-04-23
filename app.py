@@ -10,9 +10,11 @@ from sklearn.preprocessing import StandardScaler
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet
 
+# 🔥 CRITICAL FIX (DISABLE ARROW)
+pd.options.mode.dtype_backend = "numpy_nullable"
+
 # ---------------- CONFIG ----------------
 st.set_page_config(page_title="AI Bias Analyzer", layout="wide")
-
 st.title("AI Bias Detection Platform")
 
 page = st.sidebar.radio("Go to", ["Home", "Analyze"])
@@ -27,18 +29,17 @@ def generate_llm_explanation(prompt):
         import google.generativeai as genai
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
         model = genai.GenerativeModel("gemini-pro")
-        res = model.generate_content(prompt)
-        return res.text
+        return model.generate_content(prompt).text
     except:
-        return f"""
-        Bias detected in the model.
+        return """
+        Bias detected.
 
-        Possible causes:
-        - Imbalanced dataset
+        Causes:
+        - Data imbalance
         - Sensitive feature influence
 
-        Suggested actions:
-        - Remove or regularize sensitive features
+        Fix:
+        - Remove sensitive column
         - Balance dataset
         - Use fairness-aware models
         """
@@ -49,11 +50,14 @@ if page == "Analyze":
     file = st.file_uploader("Upload CSV")
 
     if file:
-        df = pd.read_csv(file)
+        # 🔥 FORCE NUMPY TYPES
+        df = pd.read_csv(file, dtype_backend="numpy_nullable")
 
-        # CLEAN
         df = df.dropna()
-        df = df.apply(lambda col: col.str.strip() if col.dtype == "object" else col)
+
+        # CLEAN STRINGS
+        for col in df.select_dtypes(include="object"):
+            df[col] = df[col].str.strip()
 
         st.dataframe(df.head())
 
@@ -66,12 +70,14 @@ if page == "Analyze":
             if df[target].dtype == "object":
                 df[target] = df[target].astype("category").cat.codes
 
-            X = pd.get_dummies(df.drop(columns=[target]))
+            X = df.drop(columns=[target])
             y = df[target]
 
             if len(y.unique()) < 2:
                 st.error("Target must have 2 classes")
                 st.stop()
+
+            X = pd.get_dummies(X)
 
             X_train, X_test, y_train, y_test = train_test_split(
                 X, y, test_size=0.2, random_state=42, stratify=y
@@ -86,22 +92,25 @@ if page == "Analyze":
 
             preds = model.predict(X_test)
 
-            # 🔥 FIX: ALIGN DATA PROPERLY
+            # 🔥 FORCE NUMERIC HARD
             df_test = df.iloc[y_test.index].copy()
-            df_test["pred"] = preds
+            df_test["pred"] = pd.Series(preds, index=y_test.index).astype(float)
 
-            # 🔥 FIX: SAFE GROUPING
-            grouped = df_test.groupby(sensitive)["pred"].mean()
+            # 🔥 SAFE GROUPING
+            grouped = (
+                df_test[[sensitive, "pred"]]
+                .dropna()
+                .assign(pred=lambda x: pd.to_numeric(x["pred"], errors="coerce"))
+                .groupby(sensitive, as_index=False)["pred"]
+                .mean()
+            )
 
-            if len(grouped) < 2:
+            if grouped.shape[0] < 2:
                 st.error("Sensitive column must have at least 2 groups")
                 st.stop()
 
-            g1, g2 = grouped.iloc[0], grouped.iloc[1]
-
-            if pd.isna(g1) or pd.isna(g2):
-                st.error("Computation failed. Try another sensitive column.")
-                st.stop()
+            g1 = grouped["pred"].iloc[0]
+            g2 = grouped["pred"].iloc[1]
 
             bias = abs(g1 - g2)
 
@@ -113,27 +122,22 @@ if page == "Analyze":
             col2.metric("Group Difference", round(abs(g1 - g2), 3))
 
             # -------- CHART --------
-            chart_df = grouped.reset_index()
-            fig = px.bar(chart_df, x=sensitive, y="pred")
+            fig = px.bar(grouped, x=sensitive, y="pred")
             st.plotly_chart(fig)
 
             # -------- LLM --------
             st.subheader("AI Insights")
 
             prompt = f"""
-            Analyze bias in ML model.
-
-            Sensitive feature: {sensitive}
-            Values:
-            {grouped.to_dict()}
-
-            Explain cause, impact and mitigation.
+            Bias detected in {sensitive}.
+            Values: {grouped.to_dict()}
+            Explain cause and mitigation.
             """
 
             explanation = generate_llm_explanation(prompt)
             st.write(explanation)
 
-            # -------- PDF REPORT --------
+            # -------- PDF --------
             st.subheader("Download Report")
 
             def create_pdf():
@@ -144,8 +148,8 @@ if page == "Analyze":
                 content = []
                 content.append(Paragraph("AI Bias Report", styles['Title']))
                 content.append(Spacer(1, 10))
-                content.append(Paragraph(f"Sensitive Feature: {sensitive}", styles['Normal']))
-                content.append(Paragraph(f"Bias Score: {bias}", styles['Normal']))
+                content.append(Paragraph(f"Feature: {sensitive}", styles['Normal']))
+                content.append(Paragraph(f"Bias: {bias}", styles['Normal']))
                 content.append(Spacer(1, 10))
                 content.append(Paragraph(explanation, styles['Normal']))
 
@@ -153,10 +157,8 @@ if page == "Analyze":
                 buffer.seek(0)
                 return buffer
 
-            pdf = create_pdf()
-
             st.download_button(
                 "Download Report",
-                data=pdf,
+                data=create_pdf(),
                 file_name="bias_report.pdf"
             )
