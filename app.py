@@ -152,12 +152,17 @@ if page == "📊 Analyze":
                 time.sleep(0.01)
                 progress.progress(i+1)
 
-            df[target] = df[target].apply(lambda x: 1 if ">50K" in str(x) else 0)
+           # Handle numeric or categorical automatically
+        if df[target].dtype == "object":
+            df[target] = df[target].astype("category").cat.codes
 
             X = pd.get_dummies(df.drop(columns=[target]))
             y = df[target]
-
-            X_train, X_test, y_train, y_test = train_test_split(X, y)
+            if len(y.unique()) < 2:
+                st.error("❌ Target column must have at least 2 classes")
+                st.stop()
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+            st.write("Class Distribution:", y.value_counts())
 
             model = LogisticRegression(max_iter=5000)
             model.fit(X_train, y_train)
