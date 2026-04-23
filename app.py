@@ -1,28 +1,20 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import matplotlib.pyplot as plt
-import json, hashlib, io, time
+import json, hashlib
 from datetime import datetime
-
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
 
 # ---------------- CONFIG ----------------
 st.set_page_config(page_title="AI Bias Platform", layout="wide")
 
-# ---------------- STYLING ----------------
+# ---------------- UI CLEAN ----------------
 st.markdown("""
 <style>
 [data-testid="stSidebar"] {display:none;}
 .block-container {max-width:1100px;margin:auto;}
 .title {font-size:42px;font-weight:800;text-align:center;}
-.subtitle {text-align:center;color:gray;margin-bottom:20px;}
-.card {
-    background:rgba(255,255,255,0.05);
-    padding:20px;
-    border-radius:12px;
-}
 </style>
 """, unsafe_allow_html=True)
 
@@ -59,112 +51,61 @@ if "analysis" not in st.session_state:
     st.session_state.analysis = None
 
 # =====================================================
-# 🔐 LOGIN / SIGNUP
+# LOGIN
 # =====================================================
 if not st.session_state.user:
+    st.title("Login")
 
-    st.markdown('<div class="title">Login / Signup</div>', unsafe_allow_html=True)
+    u = st.text_input("Username")
+    p = st.text_input("Password", type="password")
 
-    tab1, tab2 = st.tabs(["Login", "Signup"])
-
-    with tab1:
-        u = st.text_input("Username")
-        p = st.text_input("Password", type="password")
-
-        if st.button("Login"):
-            users = load_json(USERS_FILE)
-            if u in users and users[u] == hash_pw(p):
-                st.session_state.user = u
-                st.rerun()
-            else:
-                st.error("Invalid credentials")
-
-    with tab2:
-        u = st.text_input("New Username")
-        p = st.text_input("New Password", type="password")
-
-        if st.button("Create Account"):
-            users = load_json(USERS_FILE)
-            if u in users:
-                st.error("User exists")
-            else:
-                users[u] = hash_pw(p)
-                save_json(USERS_FILE, users)
-                st.success("Account created")
+    if st.button("Login"):
+        users = load_json(USERS_FILE)
+        if u in users and users[u] == hash_pw(p):
+            st.session_state.user = u
+            st.rerun()
+        else:
+            st.error("Invalid credentials")
 
     st.stop()
 
 # =====================================================
-# 🧭 NAVIGATION
+# MAIN
 # =====================================================
 st.markdown('<div class="title">AI Bias Detection Platform</div>', unsafe_allow_html=True)
-st.markdown('<div class="subtitle">Detect • Explain • Mitigate AI Bias</div>', unsafe_allow_html=True)
 
-col1, col2, col3 = st.columns(3)
+file = st.file_uploader("Upload CSV")
 
-with col1:
-    if st.button("🏠 Home"):
-        st.session_state.page = "home"
+# ---------------- DEBUG ----------------
+st.write("Session analysis exists:", st.session_state.analysis is not None)
 
-with col2:
-    if st.button("📊 Analyze"):
-        st.session_state.page = "analyze"
+if file:
+    df = pd.read_csv(file)
 
-with col3:
-    if st.button("📄 Reports"):
-        st.session_state.page = "reports"
+    st.write("Dataset loaded:", df.shape)
+    st.dataframe(df.head())
 
-if "page" not in st.session_state:
-    st.session_state.page = "home"
+    target = st.selectbox("Target Column", df.columns)
+    sensitive = st.selectbox("Sensitive Column", df.columns)
 
-page = st.session_state.page
+    if st.button("Run Analysis"):
 
-if st.button("Logout"):
-    st.session_state.user = None
-    st.rerun()
+        st.write("🚀 Button clicked")  # DEBUG
 
-# =====================================================
-# 🏠 HOME
-# =====================================================
-if page == "home":
+        try:
+            df = df.dropna()
 
-    c1, c2, c3 = st.columns(3)
-
-    with c1:
-        st.markdown('<div class="card"><b>🎯 Objective</b><br>Detect bias in ML models</div>', unsafe_allow_html=True)
-    with c2:
-        st.markdown('<div class="card"><b>⚠️ Impact</b><br>Prevent unfair decisions</div>', unsafe_allow_html=True)
-    with c3:
-        st.markdown('<div class="card"><b>🚀 Applications</b><br>Finance, Hiring, Healthcare</div>', unsafe_allow_html=True)
-
-# =====================================================
-# 📊 ANALYZE
-# =====================================================
-if page == "analyze":
-
-    st.markdown("## Bias Analysis")
-
-    file = st.file_uploader("Upload CSV")
-
-    if file:
-        df = pd.read_csv(file).dropna()
-        st.dataframe(df.head())
-
-        target = st.selectbox("Target Column", df.columns)
-        sensitive = st.selectbox("Sensitive Column", df.columns)
-
-        if st.button("Run Analysis"):
-
-            # -------- TARGET FIX --------
+            # TARGET FIX
             if df[target].dtype == "object":
                 df[target] = df[target].astype("category").cat.codes
 
             X = pd.get_dummies(df.drop(columns=[target]))
             y = df[target]
 
-            # -------- CLASS CHECK --------
+            st.write("Class distribution:", y.value_counts())  # DEBUG
+
             if len(y.unique()) < 2:
-                st.error("Target must have at least 2 classes")
+                st.error("❌ Target must have at least 2 classes")
                 st.stop()
 
             X_train, X_test, y_train, y_test = train_test_split(
@@ -179,8 +120,14 @@ if page == "analyze":
             df_test = df.loc[y_test.index].copy()
             df_test["pred"] = preds
 
-            g1 = df_test[df_test[sensitive] == df[sensitive].unique()[0]]["pred"].mean()
-            g2 = df_test[df_test[sensitive] == df[sensitive].unique()[1]]["pred"].mean()
+            groups = df_test[sensitive].unique()
+
+            if len(groups) < 2:
+                st.error("❌ Sensitive column must have 2 groups")
+                st.stop()
+
+            g1 = df_test[df_test[sensitive] == groups[0]]["pred"].mean()
+            g2 = df_test[df_test[sensitive] == groups[1]]["pred"].mean()
 
             bias = abs(g1 - g2)
 
@@ -192,61 +139,26 @@ if page == "analyze":
                 "sensitive": sensitive
             }
 
-            # SAVE REPORT
-            reports = load_json(REPORTS_FILE)
-            reports.setdefault(st.session_state.user, {})
-            rid = str(datetime.now())
-            reports[st.session_state.user][rid] = st.session_state.analysis
-            save_json(REPORTS_FILE, reports)
+            st.success("✅ Analysis stored")
 
-            st.success("Analysis complete")
+        except Exception as e:
+            st.error(f"ERROR: {e}")
 
-    # -------- DISPLAY (IMPORTANT FIX) --------
-    if st.session_state.analysis:
+# ---------------- OUTPUT ----------------
+if st.session_state.analysis:
 
-        r = st.session_state.analysis
+    st.markdown("## Results")
 
-        st.metric("Bias Score", round(r["bias"], 2))
+    r = st.session_state.analysis
 
-        chart_df = pd.DataFrame({
-            "Group": ["G1", "G2"],
-            "Value": [r["g1"], r["g2"]]
-        })
+    st.write("DEBUG: Showing results")  # DEBUG
 
-        fig = px.bar(chart_df, x="Group", y="Value")
-        st.plotly_chart(fig)
+    st.metric("Bias Score", round(r["bias"], 2))
 
-        # -------- SIMPLE AI INSIGHTS (NO API) --------
-        st.markdown("### AI Insights")
+    chart_df = pd.DataFrame({
+        "Group": ["G1", "G2"],
+        "Value": [r["g1"], r["g2"]]
+    })
 
-        if st.button("Generate Insights"):
-            explanation = f"""
-            The model shows a bias of {r['bias']:.2f} between groups 
-            in {r['sensitive']}.
-
-            This indicates unequal outcomes.
-
-            Suggested mitigation:
-            - Remove sensitive feature
-            - Balance dataset
-            - Apply fairness-aware models
-            """
-
-            st.write(explanation)
-
-# =====================================================
-# 📄 REPORTS
-# =====================================================
-if page == "reports":
-
-    reports = load_json(REPORTS_FILE).get(st.session_state.user, {})
-
-    if not reports:
-        st.info("No reports yet")
-
-    for rid, r in reports.items():
-        st.markdown("---")
-        st.write("Date:", rid)
-        st.write("Target:", r["target"])
-        st.write("Sensitive:", r["sensitive"])
-        st.write("Bias:", r["bias"])
+    fig = px.bar(chart_df, x="Group", y="Value")
+    st.plotly_chart(fig)
