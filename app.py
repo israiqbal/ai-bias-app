@@ -13,6 +13,9 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Tabl
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet
 
+# LLM IMPORTS
+import os
+
 # ------------------ CONFIG ------------------
 st.set_page_config(page_title="AI Bias Analyzer", layout="wide")
 
@@ -49,6 +52,58 @@ if page == "Home":
     - Generates professional reports  
     """)
 
+# =========================================================
+# 🤖 LLM FUNCTION (CORE)
+# =========================================================
+def generate_llm_explanation(prompt):
+
+    # ---------- 1. GEMINI ----------
+    try:
+        import google.generativeai as genai
+
+        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+
+        model = genai.GenerativeModel("gemini-pro")
+        response = model.generate_content(prompt)
+
+        return "🟢 Gemini Response:\n\n" + response.text
+
+    except Exception as e:
+        st.warning(f"Gemini failed → {e}")
+
+    # ---------- 2. GROQ ----------
+    try:
+        from groq import Groq
+
+        client = Groq(api_key=st.secrets["GROQ_API_KEY"])
+
+        chat = client.chat.completions.create(
+            model="llama3-8b-8192",
+            messages=[{"role": "user", "content": prompt}]
+        )
+
+        return "🟡 Groq Response:\n\n" + chat.choices[0].message.content
+
+    except Exception as e:
+        st.warning(f"Groq failed → {e}")
+
+    # ---------- 3. LOCAL FALLBACK ----------
+    return f"""
+🔴 Local Explanation (Fallback):
+
+The model shows bias between groups.
+
+Possible reasons:
+- Imbalanced dataset
+- Sensitive attribute influence
+- Model learning skewed patterns
+
+Suggested mitigation:
+- Remove sensitive feature
+- Balance dataset
+- Use fairness-aware algorithms
+"""
+
 # ------------------ ANALYSIS ------------------
 if page == "Analyze":
 
@@ -63,7 +118,6 @@ if page == "Analyze":
 
         if st.button("🚀 Run Analysis"):
 
-            # Animation
             progress = st.progress(0)
             for i in range(100):
                 time.sleep(0.01)
@@ -72,15 +126,20 @@ if page == "Analyze":
             with st.spinner("Running AI analysis..."):
 
                 # ------------------ MODEL ------------------
-                df[target] = df[target].apply(lambda x: 1 if ">50K" in str(x) else 0)
+                if df[target].dtype == "object":
+                    df[target] = df[target].astype("category").cat.codes
 
                 X = df.drop(columns=[target])
                 y = df[target]
 
+                if len(y.unique()) < 2:
+                    st.error("Target must have at least 2 classes")
+                    st.stop()
+
                 X = pd.get_dummies(X)
 
                 X_train, X_test, y_train, y_test = train_test_split(
-                    X, y, test_size=0.2, random_state=42
+                    X, y, test_size=0.2, random_state=42, stratify=y
                 )
 
                 scaler = StandardScaler(with_mean=False)
@@ -94,37 +153,17 @@ if page == "Analyze":
                 df_test = df.loc[y_test.index].copy()
                 df_test['pred'] = preds
 
-                g1 = df_test[df_test[sensitive] == df[sensitive].unique()[0]]['pred'].mean()
-                g2 = df_test[df_test[sensitive] == df[sensitive].unique()[1]]['pred'].mean()
+                groups = df_test[sensitive].unique()
 
-                di_ratio = g2 / g1
+                if len(groups) < 2:
+                    st.error("Sensitive column must have at least 2 groups")
+                    st.stop()
+
+                g1 = df_test[df_test[sensitive] == groups[0]]['pred'].mean()
+                g2 = df_test[df_test[sensitive] == groups[1]]['pred'].mean()
+
+                di_ratio = g2 / g1 if g1 != 0 else 0
                 bias_score = abs(g1 - g2)
-
-                # ------------------ MITIGATION ------------------
-                X2 = df.drop(columns=[target, sensitive])
-                y2 = df[target]
-
-                X2 = pd.get_dummies(X2)
-
-                X_train2, X_test2, y_train2, y_test2 = train_test_split(
-                    X2, y2, test_size=0.2, random_state=42
-                )
-
-                idx = X_test2.index
-
-                scaler2 = StandardScaler(with_mean=False)
-                X_train2 = scaler2.fit_transform(X_train2)
-                X_test2 = scaler2.transform(X_test2)
-
-                model2 = LogisticRegression(max_iter=5000, solver='liblinear')
-                model2.fit(X_train2, y_train2)
-                preds2 = model2.predict(X_test2)
-
-                df_test2 = df.loc[idx].copy()
-                df_test2['pred'] = preds2
-
-                g1_after = df_test2[df_test2[sensitive] == df[sensitive].unique()[0]]['pred'].mean()
-                g2_after = df_test2[df_test2[sensitive] == df[sensitive].unique()[1]]['pred'].mean()
 
             st.divider()
 
@@ -134,138 +173,37 @@ if page == "Analyze":
             col1, col2, col3 = st.columns(3)
             col1.metric("Bias Score", round(bias_score, 2))
             col2.metric("Disparate Impact", round(di_ratio, 2))
-            col3.metric("Improvement", round(abs(g1 - g2) - abs(g1_after - g2_after), 2))
+            col3.metric("Group Gap", round(abs(g1 - g2), 2))
 
-            # ------------------ INTERACTIVE CHART ------------------
-            st.subheader("📈 Interactive Comparison")
-
+            # ------------------ CHART ------------------
             chart_df = pd.DataFrame({
-                "Group": ["Before G1", "Before G2", "After G1", "After G2"],
-                "Value": [g1, g2, g1_after, g2_after]
+                "Group": ["Group 1", "Group 2"],
+                "Value": [g1, g2]
             })
 
             fig = px.bar(chart_df, x="Group", y="Value", color="Group")
             st.plotly_chart(fig, use_container_width=True)
 
-            # ------------------ STATUS ------------------
-            if di_ratio < 0.8:
-                st.error("⚠️ High Bias Detected")
-            else:
-                st.success("✅ Model is Fair")
+            # ------------------ LLM INSIGHTS ------------------
+            st.subheader("🤖 AI Insights")
 
-            # ------------------ PDF ------------------
-            def create_onepage_pdf():
-                    buffer = io.BytesIO()
-                    doc = SimpleDocTemplate(buffer)
-                    styles = getSampleStyleSheet()
-                
-                    content = []
-                
-                    # ------------------ TITLE ------------------
-                    content.append(Paragraph("AI Bias Analysis Report", styles['Title']))
-                    content.append(Spacer(1, 8))
-                
-                    # ------------------ EXEC SUMMARY ------------------
-                    bias_diff = abs(g1 - g2)
-                    improvement = abs(g1 - g2) - abs(g1_after - g2_after)
-                
-                    summary = f"""
-                    This report evaluates bias between <b>{sensitive}</b> groups 
-                    in predicting <b>{target}</b>. Initial disparity: {bias_diff:.2f}. 
-                    Post-mitigation improvement: {improvement:.2f}.
-                    """
-                
-                    content.append(Paragraph(summary, styles['Normal']))
-                    content.append(Spacer(1, 10))
-                
-                    # ------------------ DATA CONTEXT ------------------
-                    content.append(Paragraph("Data Context", styles['Heading3']))
-                
-                    context_text = f"""
-                    Sensitive Attribute: <b>{sensitive}</b><br/>
-                    Target Variable: <b>{target}</b><br/>
-                    Comparison: Prediction rates across groups
-                    """
-                
-                    content.append(Paragraph(context_text, styles['Normal']))
-                    content.append(Spacer(1, 10))
-                
-                    # ------------------ METRICS TABLE ------------------
-                    table_data = [
-                        ["Metric", "Before", "After"],
-                        ["Group 1", f"{g1:.2f}", f"{g1_after:.2f}"],
-                        ["Group 2", f"{g2:.2f}", f"{g2_after:.2f}"],
-                        ["Bias Gap", f"{abs(g1-g2):.2f}", f"{abs(g1_after-g2_after):.2f}"]
-                    ]
-                
-                    table = Table(table_data, colWidths=[120, 80, 80])
-                    table.setStyle([
-                        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#1e293b")),
-                        ('TEXTCOLOR', (0,0), (-1,0), colors.white),
-                        ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
-                        ('FONTSIZE', (0,0), (-1,-1), 8)
-                    ])
-                
-                    content.append(table)
-                    content.append(Spacer(1, 10))
-                
-                    # ------------------ CHART ------------------
-                    fig, ax = plt.subplots(figsize=(4,2.2))
-                
-                    ax.bar(
-                        ['B-G1','B-G2','A-G1','A-G2'],
-                        [g1, g2, g1_after, g2_after],
-                        color=['#3b82f6','#ef4444','#10b981','#f59e0b']
-                    )
-                
-                    ax.set_title("Bias Comparison", fontsize=8)
-                    ax.tick_params(axis='x', labelsize=6)
-                    ax.tick_params(axis='y', labelsize=6)
-                
-                    fig.savefig("chart.png", bbox_inches='tight')
-                    plt.close(fig)
-                
-                    content.append(Image("chart.png", width=320, height=150))
-                    content.append(Spacer(1, 8))
-                
-                    # ------------------ INSIGHTS ------------------
-                    content.append(Paragraph("Insights", styles['Heading3']))
-                
-                    if bias_diff > 0.2:
-                        level = "High bias observed"
-                    elif bias_diff > 0.1:
-                        level = "Moderate bias observed"
-                    else:
-                        level = "Low bias observed"
-                
-                    insight_text = f"""
-                    {level}. Removing <b>{sensitive}</b> improved fairness.
-                    Model now shows more balanced predictions.
-                    """
-                
-                    content.append(Paragraph(insight_text, styles['Normal']))
-                    content.append(Spacer(1, 6))
-                
-                    # ------------------ RECOMMENDATION ------------------
-                    content.append(Paragraph("Recommendation", styles['Heading3']))
-                
-                    rec_text = """
-                    Avoid using sensitive attributes directly. 
-                    Apply fairness checks in deployment pipelines.
-                    """
-                
-                    content.append(Paragraph(rec_text, styles['Normal']))
-                
-                    doc.build(content)
-                    buffer.seek(0)
-                    return buffer
-            pdf = create_onepage_pdf()
+            prompt = f"""
+            Analyze bias in a machine learning model.
 
-            st.download_button(
-                label="📄 Download Premium Report",
-                data=pdf,
-                file_name="bias_report.pdf",
-                mime="application/pdf"
-            )
+            Sensitive feature: {sensitive}
+            Target: {target}
 
-          
+            Group 1 rate: {g1}
+            Group 2 rate: {g2}
+
+            Bias score: {bias_score}
+
+            Explain:
+            1. Cause of bias
+            2. Impact
+            3. How to fix it
+            """
+
+            explanation = generate_llm_explanation(prompt)
+
+            st.write(explanation)
