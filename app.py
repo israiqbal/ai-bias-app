@@ -11,26 +11,10 @@ from sklearn.linear_model import LogisticRegression
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table
 from reportlab.lib.styles import getSampleStyleSheet
 
-from supabase import create_client
 
 # ================== CONFIG ==================
 st.set_page_config(page_title="AI Bias SaaS Platform", layout="wide")
 
-SUPABASE_URL = st.secrets.get("SUPABASE_URL")
-SUPABASE_KEY = st.secrets.get("SUPABASE_KEY")
-SUPABASE_URL = st.secrets.get("SUPABASE_URL")
-SUPABASE_KEY = st.secrets.get("SUPABASE_KEY")
-
-if not SUPABASE_URL or not SUPABASE_KEY:
-    st.error("Missing Supabase credentials")
-    st.stop()
-
-try:
-    from supabase import create_client
-    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-except Exception as e:
-    st.error(f"Supabase init failed: {e}")
-    st.stop()
 
 # ================== UI STYLE ==================
 st.markdown("""
