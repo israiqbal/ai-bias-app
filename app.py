@@ -106,7 +106,8 @@ if page == "Analyze":
             preds = model.predict(X_test)
 
             # -------- SAFE NUMERIC --------
-            df_test = df.iloc[y_test.index].copy()
+            df_test = df.loc[y_test.index].copy()
+            st.write("Groups present:", df_test[sensitive].value_counts())
             df_test["pred"] = pd.to_numeric(preds, errors="coerce")
 
             # -------- GROUPING --------
