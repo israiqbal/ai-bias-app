@@ -94,7 +94,7 @@ if page == "Analyze":
             X_train = scaler.fit_transform(X_train)
             X_test = scaler.transform(X_test)
 
-            model = LogisticRegression(max_iter=5000, solver="liblinear")
+            model = LogisticRegression(max_iter=1000, class_weight="balanced")
             model.fit(X_train, y_train)
 
             preds = model.predict(X_test)
