@@ -121,11 +121,18 @@ if page == "Analyze":
                 st.error("Grouping failed")
                 st.stop()
 
-            g1 = sum(g1_vals) / len(g1_vals)
-            g2 = sum(g2_vals) / len(g2_vals)
+           # -------- PROPER FAIRNESS METRIC --------
 
-            bias = abs(g1 - g2)
-
+            g1_positive = sum([1 for x in g1_vals if x == 1])
+            g2_positive = sum([1 for x in g2_vals if x == 1])
+            
+            g1_rate = g1_positive / len(g1_vals)
+            g2_rate = g2_positive / len(g2_vals)
+            
+            bias = abs(g1_rate - g2_rate)
+            
+            g1 = g1_rate
+            g2 = g2_rate
             st.success("Analysis Complete")
 
             # -------- METRICS --------
