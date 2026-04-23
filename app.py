@@ -12,7 +12,6 @@ from reportlab.lib.styles import getSampleStyleSheet
 
 # ---------------- CONFIG ----------------
 st.set_page_config(page_title="AI Bias Analyzer", layout="wide")
-
 st.title("AI Bias Detection Platform")
 
 page = st.sidebar.radio("Go to", ["Home", "Analyze"])
@@ -27,21 +26,20 @@ def generate_llm_explanation(prompt):
         import google.generativeai as genai
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
         model = genai.GenerativeModel("gemini-pro")
-        res = model.generate_content(prompt)
-        return res.text
+        return model.generate_content(prompt).text
     except:
-        return f"""
-        Bias detected in the model.
+        return """
+Bias detected in the model.
 
-        Possible causes:
-        - Imbalanced dataset
-        - Sensitive feature influence
+Possible causes:
+- Imbalanced dataset
+- Sensitive feature influence
 
-        Suggested actions:
-        - Remove or regularize sensitive features
-        - Balance dataset
-        - Use fairness-aware models
-        """
+Recommended actions:
+- Remove or reduce sensitive feature impact
+- Balance dataset
+- Use fairness-aware models
+"""
 
 # ---------------- ANALYZE ----------------
 if page == "Analyze":
@@ -51,9 +49,11 @@ if page == "Analyze":
     if file:
         df = pd.read_csv(file)
 
-        # CLEAN
+        # CLEAN DATA
         df = df.dropna()
-        df = df.apply(lambda col: col.str.strip() if col.dtype == "object" else col)
+
+        for col in df.select_dtypes(include="object"):
+            df[col] = df[col].astype(str).str.strip()
 
         st.dataframe(df.head())
 
@@ -62,46 +62,66 @@ if page == "Analyze":
 
         if st.button("Run Analysis"):
 
-            # -------- TARGET FIX --------
+            # -------- TARGET FIX (FOR ADULT DATASET) --------
             if df[target].dtype == "object":
-                df[target] = df[target].astype("category").cat.codes
+                df[target] = df[target].replace({
+                    "<=50K": 0,
+                    ">50K": 1,
+                    "<=50K.": 0,
+                    ">50K.": 1
+                })
+                df[target] = pd.to_numeric(df[target], errors="coerce")
 
-            X = pd.get_dummies(df.drop(columns=[target]))
+            df = df.dropna(subset=[target])
+
+            X = df.drop(columns=[target])
             y = df[target]
 
+            st.write("Target Distribution:", y.value_counts())
+
             if len(y.unique()) < 2:
-                st.error("Target must have 2 classes")
+                st.error("❌ Target must have at least 2 classes")
                 st.stop()
 
+            # -------- KEEP ORIGINAL SENSITIVE COLUMN --------
+            sensitive_series = df[sensitive]
+
+            # -------- ENCODE --------
+            X = pd.get_dummies(X)
+
+            # -------- SPLIT --------
             X_train, X_test, y_train, y_test = train_test_split(
                 X, y, test_size=0.2, random_state=42, stratify=y
             )
 
+            # -------- SCALE --------
             scaler = StandardScaler(with_mean=False)
             X_train = scaler.fit_transform(X_train)
             X_test = scaler.transform(X_test)
 
+            # -------- MODEL --------
             model = LogisticRegression(max_iter=5000, solver="liblinear")
             model.fit(X_train, y_train)
 
             preds = model.predict(X_test)
 
-            # 🔥 FIX: ALIGN DATA PROPERLY
-            df_test = df.iloc[y_test.index].copy()
-            df_test["pred"] = preds
+            # -------- CLEAN ALIGNMENT (FINAL FIX) --------
+            sens_test = sensitive_series.loc[y_test.index]
 
-            # 🔥 FIX: SAFE GROUPING
-            grouped = df_test.groupby(sensitive)["pred"].mean()
+            analysis_df = pd.DataFrame({
+                "sensitive": sens_test.values,
+                "pred": preds
+            })
+
+            # -------- SAFE GROUPING --------
+            grouped = analysis_df.groupby("sensitive")["pred"].mean()
 
             if len(grouped) < 2:
                 st.error("Sensitive column must have at least 2 groups")
                 st.stop()
 
-            g1, g2 = grouped.iloc[0], grouped.iloc[1]
-
-            if pd.isna(g1) or pd.isna(g2):
-                st.error("Computation failed. Try another sensitive column.")
-                st.stop()
+            g1 = grouped.iloc[0]
+            g2 = grouped.iloc[1]
 
             bias = abs(g1 - g2)
 
@@ -114,21 +134,23 @@ if page == "Analyze":
 
             # -------- CHART --------
             chart_df = grouped.reset_index()
-            fig = px.bar(chart_df, x=sensitive, y="pred")
+            fig = px.bar(chart_df, x="sensitive", y="pred")
             st.plotly_chart(fig)
 
             # -------- LLM --------
             st.subheader("AI Insights")
 
             prompt = f"""
-            Analyze bias in ML model.
+Bias detected in feature: {sensitive}
 
-            Sensitive feature: {sensitive}
-            Values:
-            {grouped.to_dict()}
+Group values:
+{grouped.to_dict()}
 
-            Explain cause, impact and mitigation.
-            """
+Explain:
+1. Cause of bias
+2. Impact
+3. How to mitigate
+"""
 
             explanation = generate_llm_explanation(prompt)
             st.write(explanation)
@@ -153,10 +175,8 @@ if page == "Analyze":
                 buffer.seek(0)
                 return buffer
 
-            pdf = create_pdf()
-
             st.download_button(
                 "Download Report",
-                data=pdf,
+                data=create_pdf(),
                 file_name="bias_report.pdf"
             )
