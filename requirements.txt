@@ -6,3 +6,5 @@ plotly
 reportlab
 openai
 anthropic
+google-generativeai
+groq
