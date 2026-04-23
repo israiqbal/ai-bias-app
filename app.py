@@ -29,15 +29,15 @@ def generate_llm_explanation(prompt):
         return model.generate_content(prompt).text
     except:
         return """
-Bias detected in the model.
+Bias detected.
 
-Possible causes:
-- Imbalanced dataset
+Causes:
+- Data imbalance
 - Sensitive feature influence
 
-Recommended actions:
-- Remove or reduce sensitive feature impact
+Fix:
 - Balance dataset
+- Remove sensitive feature
 - Use fairness-aware models
 """
 
@@ -49,7 +49,6 @@ if page == "Analyze":
     if file:
         df = pd.read_csv(file)
 
-        # CLEAN DATA
         df = df.dropna()
 
         for col in df.select_dtypes(include="object"):
@@ -62,7 +61,7 @@ if page == "Analyze":
 
         if st.button("Run Analysis"):
 
-            # -------- TARGET FIX (FOR ADULT DATASET) --------
+            # -------- TARGET FIX --------
             if df[target].dtype == "object":
                 df[target] = df[target].replace({
                     "<=50K": 0,
@@ -80,48 +79,50 @@ if page == "Analyze":
             st.write("Target Distribution:", y.value_counts())
 
             if len(y.unique()) < 2:
-                st.error("❌ Target must have at least 2 classes")
+                st.error("Target must have at least 2 classes")
                 st.stop()
 
-            # -------- KEEP ORIGINAL SENSITIVE COLUMN --------
-            sensitive_series = df[sensitive]
+            sensitive_series = df[sensitive].astype(str)
 
-            # -------- ENCODE --------
             X = pd.get_dummies(X)
 
-            # -------- SPLIT --------
             X_train, X_test, y_train, y_test = train_test_split(
                 X, y, test_size=0.2, random_state=42, stratify=y
             )
 
-            # -------- SCALE --------
             scaler = StandardScaler(with_mean=False)
             X_train = scaler.fit_transform(X_train)
             X_test = scaler.transform(X_test)
 
-            # -------- MODEL --------
             model = LogisticRegression(max_iter=5000, solver="liblinear")
             model.fit(X_train, y_train)
 
             preds = model.predict(X_test)
 
-            # -------- CLEAN ALIGNMENT (FINAL FIX) --------
+            # -------- CLEAN ANALYSIS DF --------
             sens_test = sensitive_series.loc[y_test.index]
 
             analysis_df = pd.DataFrame({
-                "sensitive": sens_test.values,
-                "pred": preds
+                "sensitive": sens_test.tolist(),
+                "pred": [int(p) for p in preds]  # 🔥 force pure int
             })
 
-            # -------- SAFE GROUPING --------
-            grouped = analysis_df.groupby("sensitive")["pred"].mean()
+            # -------- PURE PYTHON GROUPING (NO PANDAS MEAN) --------
+            groups = analysis_df["sensitive"].unique()
 
-            if len(grouped) < 2:
+            if len(groups) < 2:
                 st.error("Sensitive column must have at least 2 groups")
                 st.stop()
 
-            g1 = grouped.iloc[0]
-            g2 = grouped.iloc[1]
+            g1_vals = analysis_df[analysis_df["sensitive"] == groups[0]]["pred"].tolist()
+            g2_vals = analysis_df[analysis_df["sensitive"] == groups[1]]["pred"].tolist()
+
+            if len(g1_vals) == 0 or len(g2_vals) == 0:
+                st.error("Grouping failed")
+                st.stop()
+
+            g1 = sum(g1_vals) / len(g1_vals)
+            g2 = sum(g2_vals) / len(g2_vals)
 
             bias = abs(g1 - g2)
 
@@ -133,29 +134,31 @@ if page == "Analyze":
             col2.metric("Group Difference", round(abs(g1 - g2), 3))
 
             # -------- CHART --------
-            chart_df = grouped.reset_index()
-            fig = px.bar(chart_df, x="sensitive", y="pred")
+            chart_df = pd.DataFrame({
+                "Group": [groups[0], groups[1]],
+                "Value": [g1, g2]
+            })
+
+            fig = px.bar(chart_df, x="Group", y="Value")
             st.plotly_chart(fig)
 
             # -------- LLM --------
             st.subheader("AI Insights")
 
             prompt = f"""
-Bias detected in feature: {sensitive}
+Bias detected in {sensitive}.
 
 Group values:
-{grouped.to_dict()}
+{groups[0]}: {g1}
+{groups[1]}: {g2}
 
-Explain:
-1. Cause of bias
-2. Impact
-3. How to mitigate
+Explain cause and mitigation.
 """
 
             explanation = generate_llm_explanation(prompt)
             st.write(explanation)
 
-            # -------- PDF REPORT --------
+            # -------- PDF --------
             st.subheader("Download Report")
 
             def create_pdf():
@@ -166,8 +169,8 @@ Explain:
                 content = []
                 content.append(Paragraph("AI Bias Report", styles['Title']))
                 content.append(Spacer(1, 10))
-                content.append(Paragraph(f"Sensitive Feature: {sensitive}", styles['Normal']))
-                content.append(Paragraph(f"Bias Score: {bias}", styles['Normal']))
+                content.append(Paragraph(f"Feature: {sensitive}", styles['Normal']))
+                content.append(Paragraph(f"Bias: {bias}", styles['Normal']))
                 content.append(Spacer(1, 10))
                 content.append(Paragraph(explanation, styles['Normal']))
 
