@@ -213,20 +213,46 @@ if file:
         st.success("Analysis complete")
 
         # Save to DB
-        supabase.table("reports").insert({
-            "user_id": user.id,
-            "target": target,
-            "sensitive": sensitive,
-            "g1": float(g1),
-            "g2": float(g2),
-            "g1_after": float(g1_after),
-            "g2_after": float(g2_after),
-            "bias_before": float(bias_before),
-            "bias_after": float(bias_after),
-            "created_at": str(datetime.now())
-        }).execute()
+       from datetime import datetime
+import json
 
-        st.success("Saved to cloud")
+REPORTS_FILE = "reports.json"
+
+def load_reports():
+    try:
+        with open(REPORTS_FILE, "r") as f:
+            return json.load(f)
+    except:
+        return {}
+
+def save_reports(data):
+    with open(REPORTS_FILE, "w") as f:
+        json.dump(data, f, indent=4)
+
+# ---------------- SAVE REPORT ----------------
+reports = load_reports()
+
+username = st.session_state.user
+
+reports.setdefault(username, {})
+
+report_id = str(datetime.now())
+
+reports[username][report_id] = {
+    "target": target,
+    "sensitive": sensitive,
+    "g1": float(g1),
+    "g2": float(g2),
+    "g1_after": float(g1_after),
+    "g2_after": float(g2_after),
+    "bias_before": float(bias_before),
+    "bias_after": float(bias_after),
+    "created_at": report_id
+}
+
+save_reports(reports)
+
+st.success("✅ Report saved")
 
 # Show metrics
 if st.session_state.analysis:
